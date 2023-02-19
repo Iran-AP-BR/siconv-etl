@@ -48,10 +48,8 @@ Essa abstração indica que os métodos `__init__()` e `load()` devem ser obriga
 Vale destacar que o carregamento consiste apenas em ler os arquivos (tabelas) com os dados transformados e convertê-los para o formato desejado, incluisve com transformações adicionais, se necessário, e envio ao destino, que pode ser arquivos ou bancos de dados locais ou em serviços na nuvem. A título de simples exemplo, pode-se criar uma classe `JSONLoader`, conforme código a seguir, cuja finalidade é somente carregar os dados no formato `json` em arquivos em uma pasta local:
 
 ~~~python
-from etl.utils import *
+from etl import getLogger, rows_print, feedback, LoaderClass
 from pathlib import Path
-from etl.loader_object import LoaderClass
-from etl import getLogger
 
 
 class JSONLoader(LoaderClass):

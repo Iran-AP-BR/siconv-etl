@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 
-from etl.utils import *
+from etl import getLogger, rows_print, feedback, LoaderClass
 from pathlib import Path
-from etl.loader_object import LoaderClass
-from etl import getLogger
 
 
 class JSONLoader(LoaderClass):

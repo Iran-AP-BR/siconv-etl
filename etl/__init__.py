@@ -7,7 +7,7 @@ from .transformation import Transformation
 from .data_files_tools import FileTools
 from .data_files_exceptions import *
 from .utils import *
-from .loader_object import LoaderClass
+from .loader import LoaderClass
 import nltk
 from pathlib import Path
 from etl.config import Config
