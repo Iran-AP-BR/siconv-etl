@@ -1,0 +1,7 @@
+Dockerfile
+.dockerignore
+.gitignore
+README.md
+data_files
+json_loads
+__pycache__

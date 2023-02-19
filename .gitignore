@@ -1,0 +1,8 @@
+**/.git
+**/__pycache__
+**/.vscode
+**/venv/
+**/.pyc
+data_files/*
+json_loads/*
+**/*.sh

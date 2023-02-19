@@ -1,0 +1,9 @@
+version: "3.3"
+
+services:
+  etl:
+    image: siconv-etl
+    build: "."
+    container_name: siconv-etl-container
+    volumes:
+      - ./:/home
