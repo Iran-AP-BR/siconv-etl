@@ -1,19 +1,17 @@
 # -*- coding: utf-8 -*-
 
-import pandas as pd
 from .data_types import *
 from .utils import *
 from .risk_analyzer import RiskAnalyzer
-from .data_files_tools import FileTools
 import gc
-from etl.config import Config
 
 class Transformation(object):
-    def __init__(self, logger, current_date) -> None:
+    def __init__(self, logger, current_date, config, file_tools, pd) -> None:
         self.logger = logger
-        self.config = Config()
+        self.config = config
         self.current_date = current_date
-        self.file_tools = FileTools()
+        self.file_tools = file_tools
+        self.pd = pd
 
     def transform(self):
 
@@ -69,7 +67,7 @@ class Transformation(object):
         estados.rename(str.upper, axis='columns', inplace=True)
         municipios.rename(str.upper, axis='columns', inplace=True)
 
-        municipios = pd.merge(municipios, estados, how='inner', on='CODIGO_UF', 
+        municipios = self.pd.merge(municipios, estados, how='inner', on='CODIGO_UF', 
                               left_index=False, right_index=False)
         municipios.rename(columns={'NOME_x': 'NOME_MUNICIPIO',
                                    'NOME_y': 'NOME_ESTADO'}, inplace=True)
@@ -93,14 +91,14 @@ class Transformation(object):
         municipios_extra['CAPITAL'] = 'NAO'
 
         uf_nome_estado = municipios[['UF', 'NOME_ESTADO']].drop_duplicates()
-        municipios_extra = pd.merge(municipios_extra, uf_nome_estado, how='left', on='UF', 
+        municipios_extra = self.pd.merge(municipios_extra, uf_nome_estado, how='left', on='UF', 
                                     left_index=False, right_index=False)
         municipios_extra = municipios_extra.filter(['CODIGO_IBGE', 'NOME_MUNICIPIO', 'UF', 
                                                     'NOME_ESTADO', 'REGIAO', 'REGIAO_ABREVIADA', 'CAPITAL'])
 
         municipios.loc[municipios['CAPITAL']=='1', 'CAPITAL'] = 'SIM'
         municipios.loc[municipios['CAPITAL']=='0', 'CAPITAL'] = 'NAO'
-        municipios = pd.concat([municipios, municipios_extra], ignore_index=True, sort=False)
+        municipios = self.pd.concat([municipios, municipios_extra], ignore_index=True, sort=False)
         municipios = municipios.drop_duplicates()
         municipios.loc[municipios['NOME_ESTADO'].isna(), 'NOME_ESTADO'] = '#(NÃO ESPECIFICADO)'
 
@@ -126,9 +124,9 @@ class Transformation(object):
         convenios = self.file_tools.read_from_stage(table_name='convenios')
         propostas = self.file_tools.read_from_stage(table_name='propostas')
 
-        propostas_proponentes = pd.merge(propostas, proponentes, how='inner', on='IDENTIF_PROPONENTE',
+        propostas_proponentes = self.pd.merge(propostas, proponentes, how='inner', on='IDENTIF_PROPONENTE',
                                         left_index=False, right_index=False)
-        convenios = pd.merge(convenios, propostas_proponentes, how='inner', on='ID_PROPOSTA',
+        convenios = self.pd.merge(convenios, propostas_proponentes, how='inner', on='ID_PROPOSTA',
                             left_index=False, right_index=False)
         proponentes = convenios.filter(
                    ["IDENTIF_PROPONENTE", "NM_PROPONENTE", "COD_MUNIC_IBGE"]).drop_duplicates()
@@ -153,10 +151,10 @@ class Transformation(object):
 
         emendas = emendas[emendas['NR_EMENDA'].notna()].copy()
         propostas_ano = propostas.filter(['ID_PROPOSTA', 'ANO_PROP'])
-        emendas = pd.merge(emendas, propostas_ano, how='inner', on='ID_PROPOSTA', 
+        emendas = self.pd.merge(emendas, propostas_ano, how='inner', on='ID_PROPOSTA', 
                            left_index=False, right_index=False).drop_duplicates()
         emendas['NR_EMENDA'] = emendas['ANO_PROP'].astype(str) + emendas['NR_EMENDA'].astype(str)
-        emendas_convenios = pd.merge(emendas, convenios, how='inner', on='ID_PROPOSTA', 
+        emendas_convenios = self.pd.merge(emendas, convenios, how='inner', on='ID_PROPOSTA', 
                                      left_index=False, right_index=False)
         emendas_convenios['VALOR_REPASSE_EMENDA'] = emendas_convenios['VALOR_REPASSE_EMENDA'].fillna(0)
         emendas_convenios['VALOR_REPASSE_EMENDA'] = emendas_convenios['VALOR_REPASSE_EMENDA'].str.replace(',', '.', regex=False)
@@ -213,7 +211,7 @@ class Transformation(object):
         conv_repasse_emenda = emendas_convenios.groupby('NR_CONVENIO', as_index=False).sum()
         conv_repasse_emenda.rename(columns={'VALOR_REPASSE_EMENDA': 'VALOR_EMENDA_CONVENIO'}, inplace=True)
         convenios['NR_CONVENIO'] = convenios['NR_CONVENIO'].astype('int64')
-        convenios = pd.merge(convenios, conv_repasse_emenda, how='left', on='NR_CONVENIO', left_index=False, right_index=False)
+        convenios = self.pd.merge(convenios, conv_repasse_emenda, how='left', on='NR_CONVENIO', left_index=False, right_index=False)
         convenios['VALOR_EMENDA_CONVENIO'] = convenios['VALOR_EMENDA_CONVENIO'].fillna(0)
 
         convenios['INSTRUMENTO_ATIVO'] = convenios['INSTRUMENTO_ATIVO'].str.upper()
@@ -318,7 +316,7 @@ class Transformation(object):
         pagamentos = pagamentos.loc[pagamentos['NR_CONVENIO'].isin(convenios_list) &
                                 pagamentos['DATA_PAG'].notna(), :]
 
-        pagamentos = pd.merge(pagamentos, obtv, how='left', on='NR_MOV_FIN', left_index=False, right_index=False)
+        pagamentos = self.pd.merge(pagamentos, obtv, how='left', on='NR_MOV_FIN', left_index=False, right_index=False)
 
 
         pagamentos['IDENTIF_FORNECEDOR'] = pagamentos['IDENTIF_FORNECEDOR'].mask(pagamentos['IDENTIF_FAVORECIDO_OBTV_CONV'].notna(),
@@ -335,19 +333,19 @@ class Transformation(object):
         pagamentos.loc[pagamentos['IDENTIF_FORNECEDOR'].isna(), 'IDENTIF_FORNECEDOR'] = '#(NÃO ESPECIFICADA)'
         pagamentos.loc[pagamentos['NOME_FORNECEDOR'].isna(), 'NOME_FORNECEDOR'] = '#(NÃO ESPECIFICADO)'
 
-        fornecedores = pd.DataFrame(pagamentos[['IDENTIF_FORNECEDOR', 'NOME_FORNECEDOR']].drop_duplicates(), dtype=str)
+        fornecedores = self.pd.DataFrame(pagamentos[['IDENTIF_FORNECEDOR', 'NOME_FORNECEDOR']].drop_duplicates(), dtype=str)
         fornecedores['IDENTIF_FORNECEDOR'] = fornecedores['IDENTIF_FORNECEDOR'].str.upper()
         fornecedores['NOME_FORNECEDOR'] = fornecedores['NOME_FORNECEDOR'].str.upper()
         fornecedores = fornecedores.drop_duplicates()
         fornecedores['FORNECEDOR_ID'] = fornecedores.index + 1
 
-        nao_aplicavel_ = pd.DataFrame([{
+        nao_aplicavel_ = self.pd.DataFrame([{
                             'FORNECEDOR_ID': -1,
                             'IDENTIF_FORNECEDOR': 'NAO APLICAVEL',
                             'NOME_FORNECEDOR': 'NAO APLICAVEL'
                             }])
 
-        fornecedores = pd.concat([fornecedores, nao_aplicavel_], axis=0, sort=False, ignore_index=True)
+        fornecedores = self.pd.concat([fornecedores, nao_aplicavel_], axis=0, sort=False, ignore_index=True)
 
         fornecedores = set_types(fornecedores, tbl_fornecedores_type)
 
@@ -431,8 +429,8 @@ class Transformation(object):
             for flaw in fix_list1:
                 tributos.loc[tributos['DATA_TRIBUTO'].astype(str).str.endswith(flaw), 'DATA_TRIBUTO'] = fix_list1[flaw]
 
-            tributos = pd.merge(tributos, pagamentos.groupby('NR_CONVENIO').min(), how='left', on=['NR_CONVENIO'], left_index=False, right_index=False)
-            tributos = pd.merge(tributos, convenios, how='left', on=['NR_CONVENIO'], left_index=False, right_index=False)
+            tributos = self.pd.merge(tributos, pagamentos.groupby('NR_CONVENIO').min(), how='left', on=['NR_CONVENIO'], left_index=False, right_index=False)
+            tributos = self.pd.merge(tributos, convenios, how='left', on=['NR_CONVENIO'], left_index=False, right_index=False)
 
             tributos['DATA_TRIBUTO'] = tributos['DATA_TRIBUTO'].mask(tributos['DATA_TRIBUTO'].isna(), tributos['DATA'])
             tributos['DATA_TRIBUTO'] = tributos['DATA_TRIBUTO'].mask(tributos['DATA_TRIBUTO'].isna(), tributos['DIA_INIC_VIGENC_CONV'])
@@ -481,17 +479,17 @@ class Transformation(object):
 
         convenios_list = convenios['NR_CONVENIO'].unique()
 
-        assinatura_convenios = pd.DataFrame(convenios[['NR_CONVENIO', 'DIA_ASSIN_CONV',
+        assinatura_convenios = self.pd.DataFrame(convenios[['NR_CONVENIO', 'DIA_ASSIN_CONV',
                                                     'VL_GLOBAL_CONV']], dtype=str)
         assinatura_convenios.columns = ['NR_CONVENIO', 'DATA', 'VALOR']
         assinatura_convenios['TIPO'] = 'A'
 
-        inicio_vigencia_convenios = pd.DataFrame(convenios[['NR_CONVENIO', 'DIA_INIC_VIGENC_CONV',
+        inicio_vigencia_convenios = self.pd.DataFrame(convenios[['NR_CONVENIO', 'DIA_INIC_VIGENC_CONV',
                                                             'VL_GLOBAL_CONV']], dtype=str)
         inicio_vigencia_convenios.columns = ['NR_CONVENIO', 'DATA', 'VALOR']
         inicio_vigencia_convenios['TIPO'] = 'I'
 
-        fim_vigencia_convenios = pd.DataFrame(convenios[['NR_CONVENIO', 'DIA_FIM_VIGENC_CONV',
+        fim_vigencia_convenios = self.pd.DataFrame(convenios[['NR_CONVENIO', 'DIA_FIM_VIGENC_CONV',
                                                         'VL_GLOBAL_CONV']], dtype=str)
         fim_vigencia_convenios.columns = ['NR_CONVENIO', 'DATA', 'VALOR']
         fim_vigencia_convenios['TIPO'] = 'F'
@@ -524,7 +522,7 @@ class Transformation(object):
 
         pagamentos = pagamentos[pagamentos['DATA_PAG'].notna() & pagamentos['VL_PAGO'].notna()].copy()
         pagamentos['NR_CONVENIO'] = pagamentos['NR_CONVENIO'].astype('int64')
-        pagamentos = pd.merge(pagamentos, fornecedores, how='inner',
+        pagamentos = self.pd.merge(pagamentos, fornecedores, how='inner',
                               on=['IDENTIF_FORNECEDOR', 'NOME_FORNECEDOR'],
                               left_index=False, right_index=False)
         pagamentos = pagamentos[['NR_CONVENIO', 'FORNECEDOR_ID', 'DATA_PAG', 'VL_PAGO']]
@@ -545,7 +543,7 @@ class Transformation(object):
         tributos['VALOR'] = tributos['VALOR'].astype(float)
 
 
-        movimento = pd.concat([assinatura_convenios, inicio_vigencia_convenios,
+        movimento = self.pd.concat([assinatura_convenios, inicio_vigencia_convenios,
                             fim_vigencia_convenios, desembolsos, contrapartidas,
                             pagamentos, tributos], ignore_index=True, sort=False)
 
@@ -577,7 +575,7 @@ class Transformation(object):
         first_calendar_date = movimento['DATA_MOV'].min().date()
 
         periods = (self.current_date - first_calendar_date).days + 1
-        calendario = pd.DataFrame(columns=['DATA_MOV'], data=pd.date_range(first_calendar_date, 
+        calendario = self.pd.DataFrame(columns=['DATA_MOV'], data=self.pd.date_range(first_calendar_date, 
                                                              periods=periods, freq="D"))
 
         calendario.rename(columns={'DATA_MOV': 'DATA'}, inplace=True)
@@ -614,7 +612,7 @@ class Transformation(object):
     def __transform_data_atual__(self):
         feedback(self.logger, label='-> data atual', value='transforming...')
         
-        data_atual = pd.DataFrame(data={'DATA_ATUAL': [self.current_date.strftime("%d/%m/%Y")]})
+        data_atual = self.pd.DataFrame(data={'DATA_ATUAL': [self.current_date.strftime("%d/%m/%Y")]})
         data_atual = set_types(data_atual, tbl_data_atual_type)
         self.file_tools.write_data(table=data_atual, table_name='data_atual', current_date=self.current_date)
         
@@ -723,7 +721,7 @@ class Transformation(object):
         del licitacoes
         gc.collect()
 
-        atributos = pd.concat([sit_convenio, natureza_juridica, modalidade_transferencia,
+        atributos = self.pd.concat([sit_convenio, natureza_juridica, modalidade_transferencia,
                         tipo_parlamentar, modalidade_compra, tipo_licitacao, 
                         forma_licitacao, status_licitacao], axis=0, sort=False, ignore_index=True)
 

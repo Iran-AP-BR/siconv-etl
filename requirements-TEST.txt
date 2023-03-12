@@ -1,0 +1,5 @@
+#Apenas pera teste
+SQLAlchemy==1.4.39
+SQLAlchemy-Utils==0.38.3
+PyMySQL==1.0.2
+python-dotenv==0.20.0

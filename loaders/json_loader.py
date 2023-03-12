@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 
-from etl import getLogger, rows_print, feedback, LoaderClass
+from etl import rows_print, feedback, LoaderClass
 from pathlib import Path
 
 
 class JSONLoader(LoaderClass):
-    def __init__(self, path) -> None:
+    def __init__(self, path, logger) -> None:
         super().__init__()
-        self.logger = getLogger()
+        self.logger = logger
         self.path = path
 
     def load(self):
@@ -33,8 +33,14 @@ class JSONLoader(LoaderClass):
     def __load_table__(self, table_name):
         feedback(self.logger, label=f'-> {table_name}', value='updating...')
 
-        table = self.read_data(table_name=table_name)
-        table.to_json(Path(self.path).joinpath(f'{table_name}.json'), 
-                      orient='records', force_ascii=False)
+        try:
+        
+            table = self.read_data(table_name=table_name)
+            table.to_json(Path(self.path).joinpath(f'{table_name}.json'), 
+                          orient='records', force_ascii=False)
+        
+        except Exception as e:
+
+            raise Exception(f'JSONLoader: {str(e)}')  
                       
         feedback(self.logger, label=f'-> {table_name}', value=f'{rows_print(table)}')

@@ -48,14 +48,14 @@ Essa abstração indica que os métodos `__init__()` e `load()` devem ser obriga
 Vale destacar que o carregamento consiste apenas em ler os arquivos (tabelas) com os dados transformados e convertê-los para o formato desejado, incluisve com transformações adicionais, se necessário, e envio ao destino, que pode ser arquivos ou bancos de dados locais ou em serviços na nuvem. A título de simples exemplo, pode-se criar uma classe `JSONLoader`, conforme código a seguir, cuja finalidade é somente carregar os dados no formato `json` em arquivos em uma pasta local:
 
 ~~~python
-from etl import getLogger, rows_print, feedback, LoaderClass
+from etl import rows_print, feedback, LoaderClass
 from pathlib import Path
 
 
 class JSONLoader(LoaderClass):
-    def __init__(self, path) -> None:
+    def __init__(self, path, logger) -> None:
         super().__init__()
-        self.logger = getLogger()
+        self.logger = logger
         self.path = path
 
     def load(self):
@@ -81,9 +81,15 @@ class JSONLoader(LoaderClass):
     def __load_table__(self, table_name):
         feedback(self.logger, label=f'-> {table_name}', value='updating...')
 
-        table = self.read_data(table_name=table_name)
-        table.to_json(Path(self.path).joinpath(f'{table_name}.json'), 
-                      orient='records', force_ascii=False)
+        try:
+        
+            table = self.read_data(table_name=table_name)
+            table.to_json(Path(self.path).joinpath(f'{table_name}.json'), 
+                          orient='records', force_ascii=False)
+        
+        except Exception as e:
+
+            raise Exception(f'JSONLoader: {str(e)}')  
                       
         feedback(self.logger, label=f'-> {table_name}', value=f'{rows_print(table)}')
 
@@ -94,7 +100,7 @@ Nessa implementação, o método `__load_table__()` foi criado, por conveniênci
 
 ## Variáveis de ambiente:
 ---
-Essas variáveis de ambiente contém informações essenciais ao processo e são recuperadas por meio da classe `Config`. Podem ser manipuladas por meio do sistma operacional ou utilizando arquivos `.env` em conjunto com a biblioteca `python-dotenv`. Não há necessidade de alterar os valores padrões, 
+Essas variáveis de ambiente contém informações essenciais ao processo e são recuperadas por meio da classe `Config`. Podem ser manipuladas por meio do sistma operacional ou utilizando arquivos `.env` em conjunto com a biblioteca `python-dotenv`. Não há necessidade de alterar os valores padrões.
 
 - `CURRENT_DATE_URI`, indica o endereço na internet do arquivo que contém a data carga dos dados no repositório. O valor padrão é http://repositorio.dados.gov.br/seges/detru/data_carga_siconv.csv.zip.
 
@@ -129,57 +135,88 @@ Além das variáveis de ambiente a classe `Config`, disponibiliza as seguintes c
 
 ## Teste
 ---
-O script `test.py` representa uma demonstração da utilização. Esse script faz uso da classe `JSONLoader`, criada apenas como exemplo, que realiza o carregamento dos dados para arquivos `.json`. Importante salientar que para realizar o carregamento dos dados para o formato ou tecnologia desejada, deve-se criar uma classe específica, baseada na classe abstrata `LoaderClass`.
+O script `test.py` representa uma demonstração da utilização. Esse script faz uso das classes `JSONLoader` `MySQLLoader`, criadas apenas como exemplo, e que realizam carregamentos dos dados para arquivos `.json` e para um banco de dados `MySQL`. Importante salientar que para realizar o carregamento dos dados para o formato ou tecnologia desejada, deve-se criar uma classe específica, baseada na classe abstrata `LoaderClass`.
 
 ~~~python
 from loaders.json_loader import JSONLoader
-from etl import ETL
+from loaders.mysql_loader import MySQLLoader
+from etl import ETL, getLogger
 from pathlib import Path
+from etl.config import Config
+from etl.data_files_tools import FileTools
+from sqlalchemy_utils import database_exists
+import sqlalchemy as sa
+from os import getenv
+import pandas as pd
 
+
+SQLALCHEMY_DATABASE_URI = getenv('SQLALCHEMY_DATABASE_URI', 
+                                 default='mysql+pymysql://root:123456@siconvdata:3306/siconvdata')
+CHUNK_SIZE = getenv('CHUNK_SIZE', default=500000)
+
+class DB(object):
+    def __init__(self) -> None:
+        self.engine = None
+        self.db_uri = getenv('SQLALCHEMY_DATABASE_URI', 
+                                 default='mysql+pymysql://root:123456@siconvdata:3306/siconvdata')
+
+    def connect_database(self):
+        self.engine = None
+        if database_exists(self.db_uri):
+            self.engine = sa.create_engine(self.db_uri)
+    
+    def check_database(self):
+        current_date_table = 'data_atual'
+        if sa.inspect(self.engine).has_table(current_date_table):
+            return self.engine.execute(f'select DATA_ATUAL from {current_date_table}').scalar()
+
+        raise Exception(f'Tabela {current_date_table} não localizada.')
+
+    def write(self, data_frame, table_name):
+        rows_count = 0
+        nrows = len(data_frame)
+        self.engine.execute(f'truncate table {table_name};')
+        for index in range(0, nrows, CHUNK_SIZE):
+            df = data_frame[index:index + CHUNK_SIZE]
+            df.to_sql(table_name, con=self.engine, if_exists='append', index=False)
+            rows_count += len(df)
+        return rows_count
+    
 
 if __name__ == '__main__':
     path = str(Path(__file__).parent.joinpath('json_loads'))
     
-    loader = JSONLoader(path=path)
-    etl = ETL(loader=loader)
+    json_loader = JSONLoader(path=path, logger=getLogger())
+    mysql_loader = MySQLLoader(database=DB(), logger=getLogger())
+    etl = ETL(loaders=[json_loader, mysql_loader], config=Config(), file_tools=FileTools(), pd=pd)
     etl.pipeline(force_download=False, force_transformations=False)
+
 ~~~
 
-Nesse teste, as classes `ETL` e `JSONLoader` são importadas. Em seguida, a classe `JSONLoader` é instanciada no objeto `loader`, com o caminho onde os arquivos `.json` devem ser armazenados. Nesse caso, qualquer caminho válido pode ser informado.
+Nesse teste, as classes `ETL`, `JSONLoader` e `MySQLLoader` são importadas. Em seguida, as classe `JSONLoader` e`MySQLLoader` são instanciadas nos objetos `json_loader` e `mysql_loader`, respectivamente. No caso de `json_loader`, pode ser passado o caminho onde os arquivos `.json` devem ser armazenados, enquanto que no caso do `mysql_loader` é passado uma unstância da classe `DB`. Além disso, am ambos os casos é passado um logger (pode ser um logger qualquer, inclusive um disponível no módulo `etl`).
 
+A classe `DB` foi criada para executar as funções de manipulação do banco de dados, usando a técnica de injeção de dependência por meio do argumento `database`. Contudo, essas funções também pode ser incorporadas na própria classe `MySQLLoader`. O mesmo vale para o `path`, no caso da classe `JSONLoader`.
+
+Em resumo, as classes `loaders` podem ser construídas da forma que os desenvolvedor desejar, desde que seja derivada da classe abstrata `LoaderClass`.
 
 <br/>
 
 A classe `ETL` é instanciada no objeto `etl`, com `loader` como argumento. Em seguida, o método `etl.pipelione()` e executado. Esse método aceita 2 argumentos opcionais:
 
-- `force_download`, cujo valor padrão é `False`, e tem a finalidade de definir se o downloado dos dados (extração) deve ser realziado, mesmo que os dados em `STAGE_FOLDER` estejam atualizados;
+- `force_download`, cujo valor padrão é `False`, e tem a finalidade de definir se o download dos dados (extração) deve ser realizado, mesmo que os dados em `STAGE_FOLDER` estejam atualizados;
 - `force_transformations`, cujo valor padrão é `False`, e determina se a etapa de transformação deve ser executada mesmo que já existam dados transformados atualizados.
 
 Esse teste pode ser executado em qualquer ambiente (virtual ou não) com python 3.8, desde que todas as dependências seja devidamente instaladas. Por outro lado, a execução pode ser feita com auxílio do `docker`, cujas configurações já estão prontas para assegurar o funcionamento do código em ambiente isolado sem afetar o sistema operacional. 
 
 
-## Usando somente o docker (_mais complexo_)
----
-> _deve ser executado na pasta raiz do projeto, onde estão os arquivos `Dockerfile` e `docker-compose.yml`_
-#### _Build_
-
-```
-docker build . -t siconv-etl
-```
-
-#### _Run_
-```
- docker run -v<current_absolute_path>:/home siconv-etl 
-```
-
-## Usando o docker-compose (_mais simples_)
+## Usando o docker-compose
 ---
 > _deve ser executado na pasta raiz do projeto, onde estão os arquivos `Dockerfile` e `docker-compose.yml`_
 
 #### _Build_
 
 ```
-docker-compose build
+sudo docker-compose build
 ```
 
 #### _Run_

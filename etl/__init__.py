@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 
-import pandas as pd
 from datetime import datetime, timezone, timedelta
 from .extraction import Extraction
 from .transformation import Transformation
-from .data_files_tools import FileTools
 from .data_files_exceptions import *
 from .utils import *
 from .loader import LoaderClass
-import nltk
 from pathlib import Path
-from etl.config import Config
 import logging
+from functools import reduce
+import pandas as pd
+import nltk
 
 
 def getLogger():
@@ -23,14 +22,21 @@ def getLogger():
     return logger
 
 class ETL(object):
-    def __init__(self, loader=None) -> None:
-        assert loader is None or issubclass(loader.__class__, LoaderClass), \
-               "loader argument must a subclass of 'LoaderClass' abstract class"
+    def __init__(self, loaders=None, config=None, file_tools=None, pd=None) -> None:
+        assert (loaders is None or 
+                (type(loaders) is list and 
+                 reduce(lambda x, y: x and y, 
+                       [issubclass(loader.__class__, LoaderClass) for loader in loaders]))), \
+               "O argumento 'loaders' tem que ser 'None' ou uma lista de instaâncias de \
+                subclasses da classe abstract 'LoaderClass'"
 
-        self.config = Config()
+        assert pd is not None, 'Pandas não disponível.'
+
+        self.pd = pd
+        self.config = config
         self.logger = getLogger()
-        self.loader = loader
-        self.file_tools = FileTools()
+        self.loaders = loaders
+        self.file_tools = file_tools
 
         nltk_path = self.config.NLTK_DATA
         if nltk_path and Path(nltk_path).exists():
@@ -41,11 +47,17 @@ class ETL(object):
             current_date = self.check_update(force_update=force_transformations or force_download)
 
             self.extractor = Extraction(logger=self.logger, 
-                                        current_date=current_date)
+                                        current_date=current_date,
+                                        config=self.config,
+                                        file_tools=self.file_tools,
+                                        pd=pd)
             self.extractor.extract(force_download=force_download)
 
             self.transformer = Transformation(logger=self.logger, 
-                                              current_date=current_date)
+                                              current_date=current_date,
+                                              config=self.config,
+                                              file_tools=self.file_tools,
+                                              pd=pd)
             self.transformer.transform()
 
         except FILESUpToDateException:
@@ -54,18 +66,29 @@ class ETL(object):
             self.logger.info('Data Files: Dados inalterados na origem.')
         except Exception as e:
             raise Exception(f'Data Files: {str(e)}')
+        
+        self.__load__()
 
+    def __load__(self):
+        loaders_warnings = False
+        if self.loaders is not None:
+            for loader in self.loaders:
+                try:
+                    loader.load()
+                except Exception as e:
+                    loaders_warnings = True
+                    self.logger.warning(f'{str(e)}')
 
-        if self.loader is not None:
-            self.loader.load()
-
-        self.logger.info('Processo finalizado com sucesso!')
+        if loaders_warnings:
+            self.logger.warning('Processo finalizado com falhas no carregamento!')
+        else:
+            self.logger.info('Processo finalizado com sucesso!')
 
 
     def check_update(self, force_update=False):
 
         def getCurrentDate():
-            current_date = pd.read_csv(self.config.CURRENT_DATE_URI,
+            current_date = self.pd.read_csv(self.config.CURRENT_DATE_URI,
                                        compression=self.config.CURRENT_DATE_URI_COMPRESSION,
                                        dtype=str).head(1)
             return datetime_validation(current_date['data_carga'][0])
@@ -81,7 +104,6 @@ class ETL(object):
         last_date = self.file_tools.get_files_date()
         last_date_str = last_date.strftime("%Y-%m-%d") if last_date else 'Inexistente'
         feedback(self.logger, label='-> última data', value=last_date_str)
-
 
         today = datetime.now(timezone(timedelta(hours=-3))).date()
         if not force_update and last_date:

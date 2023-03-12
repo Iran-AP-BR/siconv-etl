@@ -1,9 +1,36 @@
 version: "3.3"
 
 services:
+  db:
+    image: siconv-etl-database
+    build: "./db"
+    container_name: siconv-etl-database-container
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+    volumes:
+      - ./data/database:/var/lib/mysql
+      - ./loaders/create_database.sql:/docker-entrypoint-initdb.d/initdb.sql
+    expose:
+      - 3306
+    ports:
+      - "3306:3306"
+    restart: always
+    networks:
+      - backend
+      
   etl:
     image: siconv-etl
     build: "."
     container_name: siconv-etl-container
+    links:
+      - "db:siconvdata"
     volumes:
       - ./:/home
+    depends_on:
+      - db
+    networks:
+      - backend
+
+networks:
+  backend: 
+    driver: "bridge"

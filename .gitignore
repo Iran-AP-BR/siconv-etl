@@ -4,5 +4,6 @@
 **/venv/
 **/.pyc
 data_files/*
+data/*
 json_loads/*
 **/*.sh
